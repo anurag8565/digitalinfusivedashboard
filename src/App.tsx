@@ -56,6 +56,7 @@ const firebaseApp = isFirebaseConfigured ? initializeApp(firebaseConfig) : null;
 const auth = firebaseApp ? getAuth(firebaseApp) : null;
 const db = firebaseApp ? getFirestore(firebaseApp) : null;
 const appId = import.meta.env.VITE_FIREBASE_APP_NAMESPACE || 'digital-infusive-agency-id';
+const adminSetupKey = import.meta.env.VITE_ADMIN_SETUP_KEY || '';
 const localKey = (key) => `${appId}:${key}`;
 const loadLocalData = (key, fallback) => {
   try {
@@ -140,7 +141,9 @@ export default function App() {
   const [loginUsername, setLoginUsername] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [loginName, setLoginName] = useState(''); 
+  const [loginSetupKey, setLoginSetupKey] = useState('');
   const [authError, setAuthError] = useState('');
+  const [firebaseError, setFirebaseError] = useState('');
 
   // User Management Form States
   const [newUserUsername, setNewUserUsername] = useState('');
@@ -175,6 +178,7 @@ export default function App() {
   // 1. Initialize Auth
   useEffect(() => {
     if (!isFirebaseConfigured || !auth) {
+      setFirebaseError('Firebase env missing. Create a .env file from .env.example and restart the dev server.');
       setUser({ uid: 'local-browser-session' } as any);
       return;
     }
@@ -197,8 +201,6 @@ export default function App() {
     if (!user) return;
 
     if (!isFirebaseConfigured || !db) {
-      setAppUsers(loadLocalData('users_db_v5', INITIAL_USERS_DATA));
-      setAppClients(loadLocalData('clients_db_v5', INITIAL_CLIENTS_DATA));
       setIsUsersLoaded(true);
       setIsClientsLoaded(true);
       return;
@@ -211,7 +213,7 @@ export default function App() {
       setIsUsersLoaded(true);
     }, (error) => {
       console.error('Firebase users read error:', error);
-      setAppUsers(loadLocalData('users_db_v5', INITIAL_USERS_DATA));
+      setFirebaseError('Firebase users read failed. Check Firestore rules and Anonymous Auth.');
       setIsUsersLoaded(true);
     });
 
@@ -226,7 +228,7 @@ export default function App() {
       setIsClientsLoaded(true);
     }, (error) => {
       console.error('Firebase clients read error:', error);
-      setAppClients(loadLocalData('clients_db_v5', INITIAL_CLIENTS_DATA));
+      setFirebaseError('Firebase clients read failed. Check Firestore rules and Anonymous Auth.');
       setIsClientsLoaded(true);
     });
 
@@ -307,7 +309,7 @@ export default function App() {
   // --- ACTIONS ---
   const handleLogout = async () => {
     setTeamMemberProfile(null); setShowLogin(true);
-    setLoginUsername(''); setLoginPassword(''); setAuthError('');
+    setLoginUsername(''); setLoginPassword(''); setLoginSetupKey(''); setAuthError('');
     setActiveClientId(null); setProjectData(null);
   };
 
@@ -1510,7 +1512,11 @@ export default function App() {
   // --- SECURE LOGIN LOGIC ---
   const handleLoginSubmit = () => {
     setAuthError('');
+    if (firebaseError) return setAuthError(firebaseError);
     if (appUsers.userList.length === 0) {
+      if (!isFirebaseConfigured) return setAuthError('Firebase is not connected. Add .env values first.');
+      if (!adminSetupKey) return setAuthError('Admin setup is locked. Add VITE_ADMIN_SETUP_KEY in .env first.');
+      if (loginSetupKey !== adminSetupKey) return setAuthError('Invalid admin setup key.');
       if (!loginUsername || !loginPassword || !loginName) return setAuthError('Fill all fields to setup Admin.');
       const superAdmin = { id: Date.now(), username: loginUsername, password: loginPassword, name: loginName, role: 'Super Admin' };
       saveUsersToCloud({ userList: [superAdmin] });
@@ -1533,7 +1539,7 @@ export default function App() {
   };
 
   if (showLogin) {
-    const isFirstTime = isUsersLoaded && appUsers.userList.length === 0;
+    const isFirstTime = isFirebaseConfigured && !firebaseError && isUsersLoaded && appUsers.userList.length === 0;
     return (
       <div className={`min-h-screen flex items-center justify-center ${theme === 'dark' ? 'dark bg-slate-900 text-white' : 'bg-slate-50 text-slate-900'}`}>
         <Card className="w-full max-w-md p-8 shadow-xl border-t-8 border-t-indigo-600">
@@ -1542,11 +1548,17 @@ export default function App() {
             <p className="text-slate-500 text-sm font-medium">Secure Agency Portal</p>
           </div>
           <div className="space-y-4">
+            {firebaseError && (
+              <p className="rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-sm font-bold p-3 text-center">
+                {firebaseError}
+              </p>
+            )}
             {isFirstTime && <input type="text" placeholder="Full Name" value={loginName} onChange={e => setLoginName(e.target.value)} className="w-full p-3 border border-slate-300 rounded-lg outline-none font-medium" />}
+            {isFirstTime && <input type="password" placeholder="Admin Setup Key" value={loginSetupKey} onChange={e => setLoginSetupKey(e.target.value)} className="w-full p-3 border border-slate-300 rounded-lg outline-none font-medium" />}
             <input type="text" placeholder="Username" value={loginUsername} onChange={e => setLoginUsername(e.target.value)} className="w-full p-3 border border-slate-300 rounded-lg outline-none font-medium" />
             <input type="password" placeholder="Password" value={loginPassword} onChange={e => setLoginPassword(e.target.value)} className="w-full p-3 border border-slate-300 rounded-lg outline-none font-medium" />
             {authError && <p className="text-rose-500 text-sm font-bold text-center mt-2">{authError}</p>}
-            <button onClick={handleLoginSubmit} disabled={!isUsersLoaded} className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-400 disabled:cursor-not-allowed text-white font-bold py-3.5 rounded-lg">
+            <button onClick={handleLoginSubmit} disabled={!isUsersLoaded || Boolean(firebaseError)} className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-400 disabled:cursor-not-allowed text-white font-bold py-3.5 rounded-lg">
               {!isUsersLoaded ? 'Loading Portal...' : isFirstTime ? 'Create Admin Account' : 'Login'}
             </button>
           </div>
